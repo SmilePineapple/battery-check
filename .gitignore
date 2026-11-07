@@ -1,0 +1,8 @@
+﻿# Test results and customer data never go in git
+Reports/
+Release/
+*.zip
+# Build output (published as a GitHub Release instead)
+BatteryCheck.exe
+*.download
+build/app.ico
