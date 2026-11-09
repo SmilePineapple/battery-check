@@ -26,10 +26,12 @@ $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 
 # 3. commit, tag and release (the app only accepts a release whose notes carry the matching SHA256 line)
 Push-Location $root
+$ErrorActionPreference = 'Continue'   # git writes progress to stderr; check exit codes instead
 try {
     git add -A
     git commit -m "Release v$Version" -m $Notes -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-    git push
+    git push 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'git push failed.' }
     $body = "$Notes`n`nSHA256: $hash"
     gh release create "v$Version" $exe --title "Battery Check $Version" --notes $body
     if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
