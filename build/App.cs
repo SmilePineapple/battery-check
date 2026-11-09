@@ -30,8 +30,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Battery Check")]
 [assembly: AssemblyDescription("Battery health check and dashboard")]
 [assembly: AssemblyProduct("Battery Check")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyFileVersion("1.3.1.0")]
 
 namespace BatteryCheck
 {
@@ -443,6 +443,7 @@ namespace BatteryCheck
                     case "NO FAULT FOUND": return "No fault found";
                     case "BATTERY OK": return "Battery OK";
                     case "INCONCLUSIVE": return "Inconclusive";
+                    case "CALIBRATE BATTERY, THEN RETEST": return "Calibrate & retest";
                 }
                 return Verdict.StartsWith("DO NOT") ? "Software / config" : Verdict;
             }

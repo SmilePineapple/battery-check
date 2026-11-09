@@ -470,6 +470,28 @@ if ($history.Count -ge 3) {
     }
 }
 
+# Too little wear for the use: a pack that reports ~100% after hundreds of cycles has a gauge that is not calibrated.
+# Its real capacity is then lower, and the charge level falls faster than the gauge expects, which makes the
+# measured power use look too high as well. Such a battery cannot be judged until it has been calibrated.
+$gaugeSuspect = $false
+if ($designTotal -gt 0 -and $maxCycles -gt 0) {
+    $flatTxt = ''
+    $hc = @($history | Where-Object { $_.Cycles -gt 0 -and $_.Cycles -le $maxCycles })   # skip glitched cycle values
+    if ($hc.Count -ge 3) {
+        $cycDone = $hc[-1].Cycles - $hc[0].Cycles
+        $hpLost  = $hc[0].HealthPct - $hc[-1].HealthPct
+        $mo      = ($hc[-1].Date - $hc[0].Date).TotalDays / 30.44
+        if ($cycDone -ge 500 -and $hpLost -lt 3) { $flatTxt = (", and the reported capacity stayed the same over the last {0:N0} months while it did {1} cycles" -f $mo, $cycDone) }
+    }
+    if (($maxCycles -ge $Config.CycleVeryHigh -and $healthPct -ge 95) -or ($flatTxt -and $healthPct -ge 90)) {
+        $gaugeSuspect = $true
+        foreach ($fd in @($findings | Where-Object { $_.Area -eq 'Battery' -and $_.Text -like 'The battery holds*' })) {
+            $fd.Level = 'INFO'; $fd.Text = "The battery reports {0} of its original capacity, but this figure is probably not reliable (see the calibration finding)." -f (Format-Pct $healthPct)
+        }
+        Add-Finding 'ELEVATED' 'Battery' ("The battery reports {0} health after {1} cycles{2}. Real batteries wear with use, so the battery's gauge has most likely not been calibrated and the real capacity is lower than reported. This also makes the power use look higher than it is, because the charge level drops faster than the gauge expects. Calibrate the battery and run the test again: charge to 100%, use it on battery until it switches off, then charge to 100% without interruption (Lenovo Vantage and Dell/HP tools have a 'battery gauge reset' that does this)." -f (Format-Pct $healthPct), $maxCycles, $flatTxt)
+    }
+}
+
 # ---------------------------------------------------------------------------------------------
 # 2. Measured power consumption (battery report, no admin)
 # ---------------------------------------------------------------------------------------------
@@ -515,6 +537,7 @@ if ($activeHours * 60 -ge $Config.MinActiveMinutes) {
         'ELEVATED' { Add-Finding 'ELEVATED' 'Consumption' "$msg This is above normal for light use (about $($Config.ActiveReferenceW) W). Check background apps, screen brightness, the power plan and the dedicated GPU." }
         'HIGH'     { Add-Finding 'HIGH' 'Consumption' "$msg This is high. Unless the customer runs heavy software (games, video editing), something is wasting power: background processes, malware, the dGPU always on, or a 'Best performance' power mode." }
     }
+    if ($gaugeSuspect) { $findings[$findings.Count - 1].Text += " Note: this is measured through the battery's gauge, which does not look calibrated, so the real figure may be lower." }
 } else {
     Add-Finding 'INFO' 'Consumption' ("There is too little battery use in the last {0} days to measure consumption ({1} measured, at least {2} min needed). Ask the customer to use the laptop on battery for an hour, or run the test at intake before the laptop is charged." -f $Days, (Format-Hours $activeHours), $Config.MinActiveMinutes)
 }
@@ -581,7 +604,9 @@ if ($activeW -and $activeW -gt 0 -and $fullTotal -gt 0) {
                  elseif ($batteryLevel -eq 'FAIR') { "A new battery would add $g minutes, a moderate improvement. The battery shows normal ageing, which alone does not justify a replacement." }
                  else { "A new battery would add $g minutes, a modest improvement. The battery is still in good condition." })
     $heavyTxt = $(if ($runtime.NowHeavy) { " With heavier use, like the busiest fifth of the measured time ({0:N1} W), expect about {1}." -f $heavyW, (Format-Hours $runtime.NowHeavy) } else { '' })
-    Add-Finding 'INFO' 'Runtime' ("At the measured average of {0:N1} W, a full charge lasts about {1} (Windows stops at {2}%).{3} With a new battery it would last about {4}. {5} With normal consumption ({6} W), a new battery would last {7}." -f $activeW, (Format-Hours $runtime.NowAtObserved), $criticalPct, $heavyTxt, (Format-Hours $runtime.NewAtObserved), $meaning, $refW, (Format-Hours $runtime.NewAtReference))
+    if ($gaugeSuspect) { $meaning = "These figures rely on the battery's gauge, which does not look calibrated (see the battery findings), so they may be wrong." }
+    $newTxt = $(if ($gainPct -lt 10) { "At this power use, even a new battery would only last about {0}." } else { "With a new battery it would last about {0}." }) -f (Format-Hours $runtime.NewAtObserved)
+    Add-Finding 'INFO' 'Runtime' ("At the measured average of {0:N1} W, a full charge lasts about {1} (Windows stops at {2}%).{3} {4} {5} With normal consumption ({6} W), a new battery would last {7}." -f $activeW, (Format-Hours $runtime.NowAtObserved), $criticalPct, $heavyTxt, $newTxt, $meaning, $refW, (Format-Hours $runtime.NewAtReference))
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -948,6 +973,16 @@ switch ($batteryLevel) {
     }
 }
 
+# An uncalibrated gauge makes both the health and the power use unreliable: do not send the customer either way yet
+if ($gaugeSuspect) {
+    if ($powerBad -or $batteryLevel -in 'WORN', 'REPLACE') {
+        $verdict = 'CALIBRATE BATTERY, THEN RETEST'; $color = 'grey'
+        $summary = "The battery reports almost no wear after $maxCycles cycles, which is not realistic: its gauge is most likely not calibrated. That makes the figures unreliable. The high power use may really be a worn battery whose charge level drops fast. Calibrate the battery (see the battery findings) and run the test again before deciding on a replacement."
+    } else {
+        $summary += " Note: the battery reports almost no wear after $maxCycles cycles, so its gauge is probably not calibrated. Calibrate it and test again if the customer still has a complaint."
+    }
+}
+
 if ($abnormalWear -and $batteryLevel -ne 'REPLACE') {
     $summary += ' Note: the battery is wearing faster than normal for its cycle count. Recalibrate it and check the warranty.'
 }
@@ -966,7 +1001,7 @@ $result = [ordered]@{
     Mode        = $(if ($ss) { 'Advanced (battery report + sleep study)' } else { 'Basic (battery report)' })
     Verdict     = $verdict
     Summary     = $summary
-    BatteryLevel= $batteryLevel
+    BatteryLevel= $(if ($gaugeSuspect) { 'UNKNOWN' } else { $batteryLevel })
     PowerLevel  = $powerLevel
     System      = $system
     Battery     = [ordered]@{ DesignmWh = $designTotal; FullChargemWh = $fullTotal; HealthPct = [math]::Round($healthPct, 1); WearPct = [math]::Round($wearPct, 1); Cycles = $maxCycles; Packs = $batteries; TrendPctPerMonth = $trendPerMonth
