@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds BatteryCheck.exe: one file with the native dashboard (App.cs) and the embedded analysis script.
     Uses the C# compiler that ships with Windows (.NET Framework 4.x), so no extra tools are needed.
@@ -30,8 +30,8 @@ $pngs = foreach ($s in $sizes) {
     $x = 2 * $u; $y = 8 * $u; $w = 25 * $u; $h = 16 * $u; $r = 3 * $u
     $body.AddArc($x, $y, 2*$r, 2*$r, 180, 90); $body.AddArc($x+$w-2*$r, $y, 2*$r, 2*$r, 270, 90)
     $body.AddArc($x+$w-2*$r, $y+$h-2*$r, 2*$r, 2*$r, 0, 90); $body.AddArc($x, $y+$h-2*$r, 2*$r, 2*$r, 90, 90); $body.CloseFigure()
-    $g.FillPath((New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(255, 47, 95, 179))), $body)
-    $g.FillRectangle((New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(255, 47, 95, 179))), 27.5*$u, 13*$u, 2.5*$u, 6*$u)
+    $g.FillPath((New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(255, 0, 51, 51))), $body)
+    $g.FillRectangle((New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(255, 0, 51, 51))), 27.5*$u, 13*$u, 2.5*$u, 6*$u)
     $g.FillRectangle((New-Object Drawing.SolidBrush ([Drawing.Color]::White)), 4.5*$u, 10.5*$u, 20*$u, 11*$u)
     $g.FillRectangle((New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(255, 31, 138, 76))), 6*$u, 12*$u, 12*$u, 8*$u)
     $g.Dispose()
@@ -61,7 +61,7 @@ $fw = Split-Path $csc -Parent
 $refs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll' | ForEach-Object { "/reference:`"$(Join-Path $fw $_)`"" }
 $cscArgs = @('/nologo', '/target:winexe', '/optimize+', '/platform:anycpu', "/out:`"$out`"",
              "/win32icon:`"$ico`"", "/win32manifest:`"$manifest`"",
-             "/resource:`"$(Join-Path $root 'BatteryCheck.ps1')`",BatteryCheck.ps1") + $refs + @("`"$(Join-Path $here 'App.cs')`"")
+             "/resource:`"$(Join-Path $root 'BatteryCheck.ps1')`",BatteryCheck.ps1", "/resource:`"$(Join-Path $here 'fonts\Renner.ttf')`",Renner.ttf") + $refs + @("`"$(Join-Path $here 'App.cs')`"")
 & $csc @cscArgs
 if ($LASTEXITCODE -ne 0) { throw "Compilation failed ($LASTEXITCODE)." }
 Write-Host ("Built {0} ({1:N0} KB)" -f $out, ((Get-Item $out).Length / 1KB)) -ForegroundColor Green

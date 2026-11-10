@@ -30,8 +30,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Battery Check")]
 [assembly: AssemblyDescription("Battery health check and dashboard")]
 [assembly: AssemblyProduct("Battery Check")]
-[assembly: AssemblyVersion("1.3.1.0")]
-[assembly: AssemblyFileVersion("1.3.1.0")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 namespace BatteryCheck
 {
@@ -579,17 +579,53 @@ namespace BatteryCheck
     // =========================================================================================
     static class Theme
     {
-        public static readonly Color Bg = Color.FromArgb(244, 245, 247), Card = Color.White, Text = Color.FromArgb(27, 33, 48),
-            Muted = Color.FromArgb(95, 104, 120), Line = Color.FromArgb(226, 229, 234), Soft = Color.FromArgb(240, 242, 245),
-            Accent = Color.FromArgb(47, 95, 179), Red = Color.FromArgb(198, 47, 47), Orange = Color.FromArgb(196, 122, 0),
-            Blue = Color.FromArgb(47, 111, 182), Green = Color.FromArgb(31, 138, 76), Grey = Color.FromArgb(107, 114, 128),
-            Lime = Color.FromArgb(108, 154, 31), Select = Color.FromArgb(226, 236, 252);
+        // Jabbla house style (jabbla.com): cream page, warm beige panels, deep teal for headings and actions,
+        // a warm gold accent, square corners. Status colours are kept distinct but warmed to sit on cream.
+        public static readonly Color Bg = Color.FromArgb(253, 246, 238), Card = Color.FromArgb(255, 253, 250), Text = Color.FromArgb(0, 51, 51),
+            Body = Color.FromArgb(51, 51, 51), Muted = Color.FromArgb(108, 108, 108), Line = Color.FromArgb(234, 224, 208), Soft = Color.FromArgb(247, 239, 227),
+            Accent = Color.FromArgb(0, 51, 51), AccentHover = Color.FromArgb(20, 82, 82), AccentDown = Color.FromArgb(0, 34, 34),
+            Gold = Color.FromArgb(233, 177, 98), Panel = Color.FromArgb(238, 229, 214),
+            Red = Color.FromArgb(181, 58, 58), Orange = Color.FromArgb(201, 124, 28),
+            Blue = Color.FromArgb(38, 104, 128), Green = Color.FromArgb(44, 122, 87), Grey = Color.FromArgb(122, 114, 104),
+            Lime = Color.FromArgb(122, 148, 44), Select = Color.FromArgb(238, 229, 214);
         public static float Scale = 1f;
         static readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
+        static FontFamily headFamily;
+        static System.Drawing.Text.PrivateFontCollection privateFonts;
+        [DllImport("gdi32.dll")] static extern IntPtr AddFontMemResourceEx(IntPtr pbFont, uint cbFont, IntPtr pdv, out uint pcFonts);
 
         public static void Init()
         {
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) Scale = g.DpiX / 96f;
+            // Heading font: Renner* (Jabbla's typeface, SIL Open Font License, embedded), then Century Gothic, then Segoe UI
+            try
+            {
+                using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("Renner.ttf"))
+                {
+                    if (s != null)
+                    {
+                        byte[] data = new byte[s.Length]; s.Read(data, 0, data.Length);
+                        IntPtr mem = Marshal.AllocCoTaskMem(data.Length);   // kept for the life of the program
+                        Marshal.Copy(data, 0, mem, data.Length);
+                        privateFonts = new System.Drawing.Text.PrivateFontCollection();
+                        privateFonts.AddMemoryFont(mem, data.Length);
+                        uint n; AddFontMemResourceEx(mem, (uint)data.Length, IntPtr.Zero, out n);   // lets GDI text drawing use it too
+                        if (privateFonts.Families.Length > 0) headFamily = privateFonts.Families[0];
+                    }
+                }
+            }
+            catch { headFamily = null; }
+            if (headFamily == null)
+                foreach (string name in new[] { "Century Gothic", "Segoe UI Semibold" })
+                    try { FontFamily ff = new FontFamily(name); headFamily = ff; break; } catch { }
+        }
+        // Headings in the Jabbla typeface
+        public static Font Head(float size)
+        {
+            string key = size + "|head";
+            Font f;
+            if (!fonts.TryGetValue(key, out f)) { f = headFamily != null ? new Font(headFamily, size) : Semi(size); fonts[key] = f; }
+            return f;
         }
         public static int Px(int v) { return (int)Math.Round(v * Scale); }
         public static Font F(float size, FontStyle style = FontStyle.Regular)
@@ -647,8 +683,8 @@ namespace BatteryCheck
             int w = Math.Min(bounds.Width, ts.Width + Px(16)), h = ts.Height + Px(4);
             int x = center ? bounds.X + (bounds.Width - w) / 2 : bounds.X;
             Rectangle r = new Rectangle(x, bounds.Y + (bounds.Height - h) / 2, w, h);
-            using (GraphicsPath p = Round(r, h / 2f)) using (SolidBrush b = new SolidBrush(back)) g.FillPath(b, p);
-            TextRenderer.DrawText(g, text, font, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            using (GraphicsPath p = Round(r, Px(3))) using (SolidBrush b = new SolidBrush(back)) g.FillPath(b, p);
+            TextRenderer.DrawText(g, text, font, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
             g.SmoothingMode = before;
         }
 
@@ -700,7 +736,7 @@ namespace BatteryCheck
             Graphics g = e.Graphics;
             int x = Theme.Px(14), y = Theme.Px(10), w = Width - 2 * x;
             TextRenderer.DrawText(g, title, Theme.F(8.5f), new Rectangle(x, y, w, Theme.Px(18)), Theme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(g, value, Theme.Semi(17f), new Rectangle(x, y + Theme.Px(17), w, Theme.Px(34)), valueColor, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, value, Theme.Head(18f), new Rectangle(x, y + Theme.Px(17), w, Theme.Px(34)), valueColor, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             TextRenderer.DrawText(g, sub ?? "", Theme.F(8f), new Rectangle(x, y + Theme.Px(52), w, Theme.Px(16)), Theme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             if (bar != Color.Empty) using (SolidBrush b = new SolidBrush(bar)) g.FillRectangle(b, x, Height - Theme.Px(10), w, Theme.Px(3));
         }
@@ -819,9 +855,10 @@ namespace BatteryCheck
             b.MinimumSize = new Size(0, Theme.Px(34));
             b.BackColor = primary ? Theme.Accent : Theme.Card;
             b.ForeColor = primary ? Color.White : danger ? Theme.Red : Theme.Text;
+            if (primary) b.Text = text.ToUpperInvariant();   // Jabbla buttons are uppercase
             b.FlatAppearance.BorderColor = primary ? Theme.Accent : Theme.Line;
-            b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(63, 111, 196) : Theme.Soft;
-            b.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(38, 80, 155) : Theme.Line;
+            b.FlatAppearance.MouseOverBackColor = primary ? Theme.AccentHover : Theme.Soft;
+            b.FlatAppearance.MouseDownBackColor = primary ? Theme.AccentDown : Theme.Line;
             b.Margin = new Padding(Theme.Px(6), 0, 0, 0);
             return b;
         }
@@ -1006,7 +1043,7 @@ namespace BatteryCheck
             BackColor = Theme.Card; Size = new Size(Theme.Px(460), Theme.Px(220)); Font = Theme.F(9.5f);
             Padding = new Padding(Theme.Px(24));
             TableLayoutPanel s = UI.Stack(); s.Dock = DockStyle.Fill;
-            UI.Add(s, UI.Label(title, Theme.Semi(12f)));
+            UI.Add(s, UI.Label(title, Theme.Head(13f)));
             step = UI.Label(sub, Theme.F(9f), Theme.Muted);
             step.MaximumSize = new Size(Theme.Px(410), 0);
             UI.Add(s, step);
@@ -1106,26 +1143,26 @@ namespace BatteryCheck
         // ---------- header ----------
         Control BuildHeader()
         {
-            Panel h = new Panel { Dock = DockStyle.Top, Height = Theme.Px(58), BackColor = Theme.Card, Padding = new Padding(0, 0, 0, 1) };
+            Panel h = new Panel { Dock = DockStyle.Top, Height = Theme.Px(64), BackColor = Theme.Bg, Padding = new Padding(0, 0, 0, 1) };
             h.Paint += (s, e) =>
             {
                 using (Pen p = new Pen(Theme.Line)) e.Graphics.DrawLine(p, 0, h.Height - 1, h.Width, h.Height - 1);
                 // battery glyph
                 Graphics g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-                int x = Theme.Px(22), y = Theme.Px(20);
+                int x = Theme.Px(22), y = Theme.Px(24);
                 using (Pen p = new Pen(Theme.Text, Theme.Px(2)))
                 using (GraphicsPath gp = Theme.Round(new RectangleF(x, y, Theme.Px(24), Theme.Px(16)), Theme.Px(3))) g.DrawPath(p, gp);
                 using (SolidBrush b = new SolidBrush(Theme.Text)) g.FillRectangle(b, x + Theme.Px(25), y + Theme.Px(5), Theme.Px(3), Theme.Px(6));
                 using (SolidBrush b = new SolidBrush(Theme.Green)) g.FillRectangle(b, x + Theme.Px(4), y + Theme.Px(4), Theme.Px(11), Theme.Px(8));
             };
-            Label title = UI.Label("Battery Check", Theme.Semi(13f));
-            title.Location = new Point(Theme.Px(56), Theme.Px(15));
+            Label title = UI.Label("Battery Check", Theme.Head(17f), Theme.Text);
+            title.Location = new Point(Theme.Px(56), Theme.Px(14));
             h.Controls.Add(title);
             adminLabel = UI.Label(Runner.IsAdmin() ? "Ready" : "Not running as administrator: the standby part of the test will ask for permission", Theme.F(8.5f), Theme.Muted);
-            adminLabel.Location = new Point(Theme.Px(200), Theme.Px(21));
+            adminLabel.Location = new Point(title.Left + title.PreferredWidth + Theme.Px(18), Theme.Px(25));
             h.Controls.Add(adminLabel);
 
-            FlowLayoutPanel right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, Theme.Px(12), Theme.Px(14), 0), WrapContents = false, BackColor = Theme.Card };
+            FlowLayoutPanel right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, Theme.Px(12), Theme.Px(14), 0), WrapContents = false, BackColor = Theme.Bg };
             Button csv = UI.Button("Export CSV");
             csv.Click += (s, e) => ExportCsv();
             csv.Visible = Settings.Expert;
@@ -1149,9 +1186,9 @@ namespace BatteryCheck
             Action<Updater.Release> showFound = rel =>
             {
                 found = rel;
-                upd.Text = "Update to v" + rel.Version;
+                upd.Text = "UPDATE TO V" + rel.Version;
                 upd.BackColor = Theme.Accent; upd.ForeColor = Color.White; upd.Font = Theme.Semi(9.5f);
-                upd.FlatAppearance.BorderColor = Theme.Accent; upd.FlatAppearance.MouseOverBackColor = Color.FromArgb(63, 111, 196);
+                upd.FlatAppearance.BorderColor = Theme.Accent; upd.FlatAppearance.MouseOverBackColor = Theme.AccentHover;
             };
             upd.Click += async (s, e) =>
             {
@@ -1176,7 +1213,7 @@ namespace BatteryCheck
                 }
                 catch (Exception ex)
                 {
-                    upd.Text = found != null ? "Update to v" + found.Version : "Check for updates";
+                    upd.Text = found != null ? "UPDATE TO V" + found.Version : "Check for updates";
                     MessageBox.Show(this, "The update did not work:\n\n" + ex.Message + "\n\nCheck the internet connection and try again.", "Battery Check update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 finally { upd.Enabled = true; }
@@ -1223,7 +1260,7 @@ namespace BatteryCheck
         {
             Card card = new Card { Dock = DockStyle.Fill, AutoScroll = true };
             TableLayoutPanel s = UI.Stack();
-            UI.Add(s, UI.Label("New test", Theme.Semi(11.5f)));
+            UI.Add(s, UI.Label("New test", Theme.Head(14f)));
 
             TableLayoutPanel tabs = UI.Columns(50, 50);
             tabs.Margin = new Padding(0, Theme.Px(8), 0, Theme.Px(4));
@@ -1296,11 +1333,12 @@ namespace BatteryCheck
         {
             RadioButton r = new RadioButton { Text = text, Appearance = Appearance.Button, FlatStyle = FlatStyle.Flat, TextAlign = ContentAlignment.MiddleCenter, Checked = on, Dock = DockStyle.Fill, Height = Theme.Px(34), Cursor = Cursors.Hand, Margin = new Padding(0) };
             r.FlatAppearance.BorderColor = Theme.Line;
-            r.FlatAppearance.CheckedBackColor = Theme.Select;
+            r.FlatAppearance.CheckedBackColor = Theme.Accent;   // selected: Jabbla teal with white text
             r.FlatAppearance.MouseOverBackColor = Theme.Soft;
             r.BackColor = Theme.Card;
-            r.CheckedChanged += (s, e) => r.Font = r.Checked ? Theme.Semi(9.5f) : Theme.F(9.5f);
-            r.Font = on ? Theme.Semi(9.5f) : Theme.F(9.5f);
+            Action style = () => { r.Font = r.Checked ? Theme.Semi(9.5f) : Theme.F(9.5f); r.ForeColor = r.Checked ? Color.White : Theme.Text; r.FlatAppearance.MouseOverBackColor = r.Checked ? Theme.AccentHover : Theme.Soft; };
+            r.CheckedChanged += (s, e) => style();
+            style();
             return r;
         }
         RadioButton ModeRadio(string text)
@@ -1326,7 +1364,7 @@ namespace BatteryCheck
         {
             bool local = tabLocal.Checked;
             localPanel.Visible = local; importPanel.Visible = !local;
-            runButton.Text = local ? (Settings.Expert ? "Run test on this PC" : "Test this laptop") : "Analyse reports";
+            runButton.Text = (local ? (Settings.Expert ? "Run test on this PC" : "Test this laptop") : "Analyse reports").ToUpperInvariant();
             tipLabel.Visible = local;
         }
         static bool HasBattery()
@@ -1345,7 +1383,7 @@ namespace BatteryCheck
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.Px(290)));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.Px(190)));
-            Label title = UI.Label("Test history", Theme.Semi(11.5f)); title.Anchor = AnchorStyles.Left;
+            Label title = UI.Label("Test history", Theme.Head(14f)); title.Anchor = AnchorStyles.Left;
             search = UI.Text(); UI.Cue(search, "Search ticket, customer, device, serial…"); search.Anchor = AnchorStyles.Left | AnchorStyles.Right; search.Dock = DockStyle.None; search.Margin = new Padding(0, Theme.Px(3), Theme.Px(8), 0);
             search.TextChanged += (s, e) => FillGrid();
             filter = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.F(9.5f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, Theme.Px(3), 0, 0) };
@@ -1644,11 +1682,33 @@ namespace BatteryCheck
             }
             else
             {
-                // Basic: just the findings, full width
+                // Basic: up to four short points in plain words, full width
                 bodyT.ColumnStyles[1].Width = 0;
-                Card c = new Card { Dock = DockStyle.Fill, Padding = new Padding(Theme.Px(8)) };
-                Control f = BuildFindings(); f.Dock = DockStyle.Fill;
-                c.Controls.Add(f);
+                Card c = new Card { Dock = DockStyle.Fill, Padding = new Padding(Theme.Px(22), Theme.Px(16), Theme.Px(22), Theme.Px(16)) };
+                List<object> points = J.List(r.Data, "Basic.Points");
+                if (points.Count == 0) { Control f = BuildFindings(); f.Dock = DockStyle.Fill; c.Padding = new Padding(Theme.Px(8)); c.Controls.Add(f); }   // tests from older versions
+                else
+                {
+                    TableLayoutPanel s = UI.Stack();
+                    UI.Add(s, UI.Label("What we found", Theme.Head(14f)));
+                    TableLayoutPanel g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0, Theme.Px(10), 0, 0) };
+                    g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.Px(110)));
+                    g.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                    foreach (object p in points)
+                    {
+                        string lvl = J.Str(p, "Level");
+                        string tag = lvl == "HIGH" ? "PROBLEM" : lvl == "ELEVATED" ? "ATTENTION" : "OK";
+                        PillLabel pill = new PillLabel(tag, Theme.Level(lvl)); pill.Margin = new Padding(0, Theme.Px(9), 0, Theme.Px(9));
+                        Label txt = UI.Label(J.Str(p, "Text"), Theme.F(11.5f)); txt.Margin = new Padding(0, Theme.Px(6), 0, Theme.Px(6));
+                        txt.MaximumSize = new Size(Theme.Px(1100), 0);
+                        g.Controls.Add(pill); g.Controls.Add(txt);
+                    }
+                    UI.Add(s, g, false);
+                    Label more = UI.Label("Switch to Expert (top right) for all details, figures and the cause of each point.", Theme.F(9f), Theme.Muted);
+                    more.Margin = new Padding(0, Theme.Px(14), 0, 0);
+                    UI.Add(s, more);
+                    c.Controls.Add(s);
+                }
                 bodyT.Controls.Add(c, 0, 0);
             }
             Controls.Add(bodyT, 0, 3);
@@ -1697,15 +1757,16 @@ namespace BatteryCheck
             if (r.Technician != "") metaBits.Add("Technician " + r.Technician);
             if (metaBits.Count > 0) sysLine += "  ·  " + string.Join("  ·  ", metaBits.ToArray());
             UI.Add(s, UI.Label(sysLine, Theme.F(8.5f), Theme.Muted));
-            UI.Add(s, UI.Label(r.Verdict, Theme.F(17f, FontStyle.Bold), Theme.ByName(r.ColorName)));
-            Label summary = UI.Label(J.Str(r.Data, "Summary"), Theme.F(10f));
+            UI.Add(s, UI.Label(r.Verdict, Theme.Head(21f), Theme.ByName(r.ColorName)));
+            string advice = J.Str(r.Data, "Basic.Advice");
+            Label summary = !Settings.Expert && advice != "" ? UI.Label(advice, Theme.F(12.5f), Theme.Text) : UI.Label(J.Str(r.Data, "Summary"), Theme.F(10f));
             UI.Add(s, summary);
             FlowLayoutPanel pills = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, Theme.Px(8), 0, 0) };
             pills.Controls.Add(UI.Label("Battery", Theme.F(9f), Theme.Muted));
             pills.Controls.Add(new PillLabel(J.Str(r.Data, "BatteryLevel"), Theme.Level(J.Str(r.Data, "BatteryLevel"))));
             pills.Controls.Add(UI.Label("Power consumption", Theme.F(9f), Theme.Muted));
             pills.Controls.Add(new PillLabel(J.Str(r.Data, "PowerLevel"), Theme.Level(J.Str(r.Data, "PowerLevel"))));
-            UI.Add(s, pills, false);
+            if (Settings.Expert || advice == "") UI.Add(s, pills, false);   // Basic: the tiles already say this
             c.Controls.Add(s);
             FitHeight(c, s, setRowHeight, summary);
             return c;
@@ -1752,6 +1813,22 @@ namespace BatteryCheck
             {
                 int k = 0;
                 healthSub = string.Join(" · ", packs.Select(p => "battery " + (++k) + ": " + Theme.N(J.Num(p, "HealthPct"), 0, "%")).ToArray());
+            }
+            if (!Settings.Expert)
+            {
+                // Basic: four plain figures
+                t.ColumnCount = 4; t.ColumnStyles.Clear();
+                for (int i = 0; i < 4; i++) t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+                Func<string, string> word = l => l == "OK" || l == "NORMAL" ? "normal" : l == "FAIR" ? "normal ageing" : l == "ELEVATED" || l == "WORN" ? "above normal" : l == "HIGH" || l == "REPLACE" ? "too high" : "";
+                string bl = J.Str(r.Data, "BatteryLevel");
+                string healthWord = bl == "OK" ? "good" : bl == "FAIR" ? "normal ageing" : bl == "WORN" ? "worn" : bl == "REPLACE" ? "worn out" : "not reliable";
+                t.Controls.Add(new Tile("Battery health", Theme.N(health.HasValue ? Math.Min(100, health.Value) : (double?)null, 0, "%"), healthWord, health.HasValue && bl != "UNKNOWN" ? Theme.Health(health.Value) : Theme.Line), 0, 0);
+                double? lifeNow = J.Num(r.Data, "Runtime.NowAtObserved"), lifeNew = J.Num(r.Data, "Runtime.NewAtObserved");
+                t.Controls.Add(new Tile("Battery life now", Theme.Hours(lifeNow), lifeNew.HasValue ? "with a new battery: " + Theme.Hours(lifeNew) : "", Color.Empty), 1, 0);
+                string al = J.Str(r.Data, "Consumption.ActiveLevel"), sl = J.Str(r.Data, "Consumption.StandbyLevel");
+                t.Controls.Add(new Tile("Power use", Theme.N(w, 0, " W"), word(al), Theme.Level(al)), 2, 0);
+                t.Controls.Add(new Tile("Lost per day in standby", sb.HasValue ? Math.Min(100, Math.Round(sb.Value * 24)) + "%" : "—", word(sl), Theme.Level(sl)), 3, 0);
+                return t;
             }
             t.Controls.Add(new Tile(packs.Count > 1 ? "Battery health (" + packs.Count + " batteries)" : "Battery health", Theme.N(health, 1, "%"), healthSub, health.HasValue ? Theme.Health(health.Value) : Theme.Line), 0, 0);
             t.Controls.Add(new Tile("Cycle count", Theme.N(cycles, 0), "", Color.Empty), 1, 0);
@@ -1967,7 +2044,7 @@ namespace BatteryCheck
         {
             Card c = new Card { Dock = DockStyle.Fill };
             TableLayoutPanel s = UI.Stack();
-            UI.Add(s, UI.Label("Ticket", Theme.Semi(11f)));
+            UI.Add(s, UI.Label("Ticket", Theme.Head(13f)));
             UI.Add(s, UI.FieldLabel("Status"));
             ComboBox status = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.F(9.5f) };
             status.Items.AddRange(MainForm.StatusList);

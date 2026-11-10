@@ -605,7 +605,7 @@ if ($activeW -and $activeW -gt 0 -and $fullTotal -gt 0) {
                  else { "A new battery would add $g minutes, a modest improvement. The battery is still in good condition." })
     $heavyTxt = $(if ($runtime.NowHeavy) { " With heavier use, like the busiest fifth of the measured time ({0:N1} W), expect about {1}." -f $heavyW, (Format-Hours $runtime.NowHeavy) } else { '' })
     if ($gaugeSuspect) { $meaning = "These figures rely on the battery's gauge, which does not look calibrated (see the battery findings), so they may be wrong." }
-    $newTxt = $(if ($gainPct -lt 10) { "At this power use, even a new battery would only last about {0}." } else { "With a new battery it would last about {0}." }) -f (Format-Hours $runtime.NewAtObserved)
+    $newTxt = $(if ($gainPct -lt 10 -and $runtime.NewAtObserved -lt 4) { "At this power use, even a new battery would only last about {0}." } else { "With a new battery it would last about {0}." }) -f (Format-Hours $runtime.NewAtObserved)
     Add-Finding 'INFO' 'Runtime' ("At the measured average of {0:N1} W, a full charge lasts about {1} (Windows stops at {2}%).{3} {4} {5} With normal consumption ({6} W), a new battery would last {7}." -f $activeW, (Format-Hours $runtime.NowAtObserved), $criticalPct, $heavyTxt, $newTxt, $meaning, $refW, (Format-Hours $runtime.NewAtReference))
 }
 
@@ -851,7 +851,7 @@ if ($selfWakePattern) {
             $top = @($hits | Group-Object | Sort-Object Count -Descending)[0]
             $matchTxt = " The sleep study covers {0} of these wake-ups; {1} of them started with '{2}'." -f $hits.Count, $top.Count, $top.Name
             if ($top.Name -match 'Drain Budget') {
-                $matchTxt += " That means Windows ended standby to protect the battery, but the laptop did not go into hibernate: it woke up for a few minutes and went back to sleep, over and over. The laptop sleeps properly in between, so the wake-ups themselves cost the battery. Check that hibernate works (power options: 'Hibernate after'), and install the latest Windows and firmware updates."
+                $matchTxt += " That means Windows ended standby to protect the battery, but the laptop did not go into hibernate: it woke up for a few minutes and went back to sleep, over and over. The laptop sleeps properly in between, so the wake-ups themselves cost the battery. Test whether hibernate works: save your work and run 'shutdown /h' in a command prompt. If the laptop does not switch off fully, hibernate is failing, which is the cause. Install the latest Windows and firmware (UEFI) updates."
             }
         }
     }
@@ -987,6 +987,83 @@ if ($abnormalWear -and $batteryLevel -ne 'REPLACE') {
     $summary += ' Note: the battery is wearing faster than normal for its cycle count. Recalibrate it and check the warranty.'
 }
 
+# ---------------------------------------------------------------------------------------------
+# Basic mode: one line of advice and at most four short points in plain words (Expert mode shows all findings)
+# ---------------------------------------------------------------------------------------------
+$advice = switch ($verdict) {
+    'REPLACE BATTERY'                 { 'Replace the battery.' }
+    'REPLACE + FIX SOFTWARE'          { 'Replace the battery, and also fix the power drain below.' }
+    'REPLACEMENT JUSTIFIED'           { 'A new battery will noticeably improve the battery life.' }
+    'FIX SOFTWARE FIRST'              { 'Fix the power drain below first, then decide on a new battery.' }
+    'DO NOT REPLACE - SOFTWARE/CONFIG'{ 'Do not replace the battery. Fix the cause below instead.' }
+    'NO FAULT FOUND'                  { 'No repair needed: battery and power use are normal.' }
+    'BATTERY OK'                      { 'The battery is fine. Use it on battery for a while and test again to check power use.' }
+    'CALIBRATE BATTERY, THEN RETEST'  { 'Calibrate the battery, then run the test again.' }
+    default                           { 'The battery gives no usable data. Check it with the manufacturer''s tool.' }
+}
+function Get-ShortFinding($f) {
+    $hp = Format-Pct ([math]::Min(100.0, $healthPct))
+    $t = $f.Text; $l = $f.Level
+    if ($f.Area -eq 'Battery') {
+        if ($t -like 'The battery holds*' -or $t -like 'The battery reports * of its original*') {
+            if ($gaugeSuspect) { return $null }
+            switch ($batteryLevel) {
+                'OK'      { return "Battery is in good condition ($hp)." }
+                'FAIR'    { return "Battery shows normal ageing ($hp), no need to replace it." }
+                'WORN'    { return "Battery is clearly worn ($hp)." }
+                'REPLACE' { return "Battery is worn out ($hp)." }
+            }
+        }
+        if ($t -like 'The battery reports * health after*') { return 'Battery readings look unreliable: calibrate it and test again.' }
+        if ($t -like 'The battery does not report its design*') { return 'Battery does not report its capacity: possible fault.' }
+        if ($t -like 'One battery is clearly more worn*') { return 'One of the two batteries is much more worn than the other.' }
+        if ($t -like 'The full charge capacity is higher*') { return 'Battery gauge needs calibrating.' }
+        if ($t -like 'This is more wear than expected*') { return 'Battery has worn faster than normal: check the warranty.' }
+        if ($t -like 'Capacity dropped suddenly*') { return 'Battery capacity dropped suddenly: possible cell fault.' }
+        if ($t -like 'The battery has done*' -and $l -ne 'INFO') { return "Battery has done a lot of charge cycles ($maxCycles)." }
+        return $null
+    }
+    if ($l -notin 'HIGH', 'ELEVATED') { return $null }
+    if ($f.Area -eq 'Consumption') {
+        if ($t -like 'In use on battery*') { return $(if ($l -eq 'HIGH') { "Uses a lot of power while in use ({0:N0} W)." -f $activeW } else { "Uses more power than normal while in use ({0:N0} W)." -f $activeW }) }
+        if ($t -match "^'([^']+)' used") { return "'$($Matches[1])' uses a lot of power: check if it is needed." }
+    }
+    if ($f.Area -eq 'Standby') {
+        if ($t -like 'The main thing keeping*' -and $t -match "is '([^']+)'") { $n = $Matches[1] -replace '\s*\(.*$', ''; return "'$n' keeps the laptop awake in standby." }
+        if ($t -like '*slept properly (hardware in deep sleep), but*') { return 'Loses charge while asleep: update firmware and drivers, unplug accessories.' }
+        if ($t -like 'In standby on battery*') { return ("Loses too much charge with the lid closed (about {0:N0}% a day)." -f ([math]::Min(100.0, $standbyPctH * 24))) }
+        if ($t -like '*kept the laptop awake*') { return 'Software or a device keeps the laptop awake in standby.' }
+    }
+    if ($f.Area -eq 'Wake-ups') {
+        if ($t -like 'The battery report shows the laptop waking itself up*') { return "Keeps waking itself up from standby ($($selfWakes.Count) times), which drains the battery." }
+        if ($t -like 'Windows ended standby*') { return 'Does not get into deep sleep, so the battery drains in standby.' }
+        if ($t -like '*network adapter*' -or $t -like '*Wake-on-LAN*') { return 'A network adapter is allowed to wake the laptop (Wake-on-LAN).' }
+        if ($t -like 'On battery, the laptop came out of standby by itself*') { return 'Wakes itself up from standby (Windows maintenance or timers).' }
+    }
+    return $null
+}
+$rank = @{ HIGH = 0; ELEVATED = 1; FAIR = 2; OK = 3; INFO = 4 }
+$basicPoints = @()
+foreach ($f in @($findings | Sort-Object { $rank[$_.Level] })) {
+    $s = Get-ShortFinding $f
+    if ($s -and -not ($basicPoints | Where-Object { $_.Text -eq $s })) { $basicPoints += [pscustomobject]@{ Level = $f.Level; Text = $s } }
+}
+# Keep the battery line, plus the most important other points
+# Merge points that say the same thing
+if (@($basicPoints | Where-Object { $_.Text -like "'*' keeps the laptop awake*" }).Count) { $basicPoints = @($basicPoints | Where-Object { $_.Text -notlike 'Software or a device keeps*' -and $_.Text -notlike 'Does not get into deep sleep*' }) }
+$lidPoint = @($basicPoints | Where-Object { $_.Text -like 'Loses too much charge with the lid closed*' })[0]
+if ($lidPoint -and @($basicPoints | Where-Object { $_.Text -like 'Loses charge while asleep*' }).Count) {
+    $lidPoint.Text = $lidPoint.Text.TrimEnd('.') + ': update firmware and drivers, unplug accessories.'
+    $basicPoints = @($basicPoints | Where-Object { $_.Text -notlike 'Loses charge while asleep*' })
+}
+if ($gaugeSuspect) {   # the gauge makes the power figure unreliable: lead with the calibration, drop the power-use line
+    $basicPoints = @($basicPoints | Where-Object { $_.Text -notlike 'Uses * power while in use*' })
+    foreach ($p in $basicPoints) { if ($p.Text -like 'Battery readings look unreliable*') { $p.Level = 'HIGH' } }
+}
+$batPoint = @($basicPoints | Where-Object { $_.Text -like 'Battery*' })[0]
+$others = @($basicPoints | Where-Object { $_ -ne $batPoint } | Select-Object -First 3)
+$basicPoints = @(@($batPoint) + $others | Where-Object { $_ } | Sort-Object { $rank[$_.Level] })
+
 $safeName = ($system.Computer -replace '[^\w\-]', '_')
 $resultId = "BatteryCheck-$safeName-$stamp"
 $rawDirFinal = $(if ($BatteryReportXml -like "$workDir*") { Split-Path $workDir -Leaf } else { Split-Path (Split-Path (Resolve-Path $BatteryReportXml).Path -Parent) -Leaf })
@@ -1013,6 +1090,7 @@ $result = [ordered]@{
     Findings    = $findings
     WakeConfig  = $wakeConfig
     SelfWakes   = $selfWakeInfo
+    Basic       = [ordered]@{ Advice = $advice; Points = @($basicPoints) }
     Thresholds  = $Config
 }
 
@@ -1056,16 +1134,17 @@ function Gauge([double]$pct) {
 
 $sb = New-Object Text.StringBuilder
 $css = @'
-:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#5d6675;--line:#e3e6eb;--ok:#1f8a4c;--fair:#6c9a1f;--warn:#c47a00;--bad:#c62f2f;--info:#3d6fb6;--grey:#6b7280}
+:root{--bg:#fdf6ee;--card:#fffdfa;--text:#003333;--body:#333;--muted:#6c6c6c;--line:#eae0d0;--panel:#eee5d6;--gold:#e9b162;--ok:#2c7a57;--fair:#7a942c;--warn:#c97c1c;--bad:#b53a3a;--info:#266880;--grey:#7a7268}
+/* Jabbla house style: cream, beige, deep teal, gold accent, square corners, Renner* headings */
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI",system-ui,sans-serif}
 .wrap{max-width:960px;margin:0 auto;padding:24px 16px 48px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 12px}.muted{color:var(--muted)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-top:16px}
+h1,h2,.verdict .v,.kpi .n{font-family:"Renner*","Century Gothic","Segoe UI",sans-serif;font-weight:400;color:var(--text)}h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:0 0 12px}.muted{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:0;padding:18px 20px;margin-top:16px}
 .verdict{border-left:8px solid var(--grey)}.verdict.red{border-color:var(--bad)}.verdict.orange{border-color:var(--warn)}.verdict.blue{border-color:var(--info)}.verdict.green{border-color:var(--ok)}
-.verdict .v{font-size:24px;font-weight:700;letter-spacing:.3px}.verdict.red .v{color:var(--bad)}.verdict.orange .v{color:var(--warn)}.verdict.blue .v{color:var(--info)}.verdict.green .v{color:var(--ok)}
+.verdict .v{font-size:28px;letter-spacing:.3px}.verdict.red .v{color:var(--bad)}.verdict.orange .v{color:var(--warn)}.verdict.blue .v{color:var(--info)}.verdict.green .v{color:var(--ok)}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
-.kpi{border:1px solid var(--line);border-radius:8px;padding:10px 12px}.kpi .l{font-size:12px;color:var(--muted)}.kpi .n{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
-.badge{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;color:#fff;vertical-align:middle}
+.kpi{border:1px solid var(--line);border-radius:0;padding:10px 12px}.kpi .l{font-size:12px;color:var(--muted)}.kpi .n{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:3px;color:#fff;vertical-align:middle}
 .badge.ok{background:var(--ok)}.badge.fair{background:var(--fair)}.badge.warn{background:var(--warn)}.badge.bad{background:var(--bad)}.badge.info{background:var(--grey)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--muted);font-weight:600}td.r,th.r{text-align:right}
 .find td:first-child{width:90px}.find td:nth-child(2){width:110px;color:var(--muted)}
